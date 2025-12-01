@@ -5,7 +5,7 @@ import { ScoutAIClient, ResultPayload } from './api/client';
 import { extractDiffMetadata } from './diff/extractor';
 import { executeFlows } from './executor/playwright';
 import { postPRComment, calculateSummary, setOutputs } from './reporter/github';
-import { crawlPage } from './crawler';
+import { crawlSite } from './crawler';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -94,13 +94,24 @@ async function run(): Promise<void> {
     // Install Playwright browsers (needed for crawling)
     await installPlaywright();
 
-    // Crawl the site to get real page structure
-    core.info('Crawling site to discover page structure...');
+    // Crawl the site to get real page structure (up to 3 pages in fast mode, 5 in deep)
+    const maxPages = mode === 'fast' ? 3 : 5;
+    core.info(`Crawling site to discover page structure (max ${maxPages} pages)...`);
     let siteContext;
     try {
-      const homePage = await crawlPage(baseUrl);
-      siteContext = { pages: [homePage] };
-      core.info(`Discovered: ${homePage.links.length} links, ${homePage.forms.length} forms, ${homePage.buttons.length} buttons`);
+      const pages = await crawlSite(baseUrl, maxPages);
+      siteContext = { pages };
+
+      // Summarize what we found
+      const totalLinks = pages.reduce((sum, p) => sum + p.links.length, 0);
+      const totalForms = pages.reduce((sum, p) => sum + p.forms.length, 0);
+      const totalInputs = pages.reduce((sum, p) => sum + p.forms.reduce((s, f) => s + f.inputs.length, 0), 0);
+      const totalButtons = pages.reduce((sum, p) => sum + p.buttons.length, 0);
+      core.info(`Crawled ${pages.length} pages. Found: ${totalLinks} links, ${totalForms} forms, ${totalInputs} inputs, ${totalButtons} buttons`);
+
+      for (const page of pages) {
+        core.info(`  - ${page.url}: ${page.forms.length} forms, ${page.forms.reduce((s, f) => s + f.inputs.length, 0)} inputs`);
+      }
     } catch (error) {
       core.warning(`Failed to crawl site: ${error}. Proceeding without site context.`);
     }

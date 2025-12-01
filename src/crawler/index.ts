@@ -130,7 +130,15 @@ export async function crawlPage(url: string): Promise<PageContext> {
             inputSelector = `#${input.id}`;
           } else if (name) {
             inputSelector = `[name="${name}"]`;
-          } else if (type !== 'hidden') {
+          } else if (placeholder) {
+            inputSelector = `[placeholder="${placeholder}"]`;
+          } else if (type && type !== 'hidden') {
+            // Fall back to type-based selector within form context
+            inputSelector = `${selector} input[type="${type}"]`;
+          }
+
+          // Last resort: use nth selector within form
+          if (!inputSelector && type !== 'hidden') {
             inputSelector = `${selector} input >> nth=${j}`;
           }
 
@@ -140,9 +148,14 @@ export async function crawlPage(url: string): Promise<PageContext> {
             const labelEl = document.querySelector(`label[for="${input.id}"]`);
             if (labelEl) label = labelEl.textContent?.trim().substring(0, 30) || '';
           }
+          // Also check parent label
+          if (!label) {
+            const parentLabel = input.closest('label');
+            if (parentLabel) label = parentLabel.textContent?.trim().substring(0, 30) || '';
+          }
 
           return { name, type, placeholder, selector: inputSelector, label };
-        }).filter(i => i.type !== 'hidden' && i.selector);
+        }).filter(i => i.type !== 'hidden');
 
         return { action, method, selector, inputs };
       });
