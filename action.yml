@@ -1,0 +1,38 @@
+name: 'ScoutAI QA'
+description: 'Autonomous QA agent that analyzes diffs and runs intelligent tests'
+author: 'ScoutAI'
+
+branding:
+  icon: 'check-circle'
+  color: 'green'
+
+inputs:
+  api-key:
+    description: 'ScoutAI API key'
+    required: true
+  base-url:
+    description: 'Base URL of the application to test (e.g., staging URL)'
+    required: true
+  mode:
+    description: 'Test mode: fast (PR checks) or deep (nightly exploration)'
+    required: false
+    default: 'fast'
+  api-endpoint:
+    description: 'ScoutAI API endpoint'
+    required: false
+    default: 'https://scoutai-api.onrender.com'
+  project-id:
+    description: 'ScoutAI project ID (auto-detected from repo if not provided)'
+    required: false
+
+outputs:
+  run-id:
+    description: 'The ScoutAI run ID'
+  status:
+    description: 'Test run status (passed, failed, error)'
+  summary:
+    description: 'JSON summary of test results'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
