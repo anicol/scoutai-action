@@ -57,6 +57,21 @@ export interface Project {
     github_repo: string;
     base_url?: string;
 }
+export interface TestAccount {
+    id: string;
+    name: string;
+    role: string;
+    email: string;
+    password: string;
+    auth_type: 'form' | 'oauth' | 'api_key' | 'basic';
+    login_url: string;
+    email_selector?: string;
+    password_selector?: string;
+    submit_selector?: string;
+    success_indicator?: string;
+    is_default: boolean;
+    is_active: boolean;
+}
 export declare class ScoutAIClient {
     private apiKey;
     private baseUrl;
@@ -72,5 +87,7 @@ export declare class ScoutAIClient {
         skipped: number;
     }): Promise<void>;
     uploadResults(runId: string, results: ResultPayload[]): Promise<void>;
+    getDefaultTestAccount(projectId: string): Promise<TestAccount | null>;
+    getTestAccounts(projectId: string): Promise<TestAccount[]>;
 }
 //# sourceMappingURL=client.d.ts.map

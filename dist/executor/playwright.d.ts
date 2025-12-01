@@ -1,10 +1,18 @@
-import { FlowPlan, ResultPayload } from '../api/client';
+import { FlowPlan, ResultPayload, TestAccount } from '../api/client';
 export declare class PlaywrightExecutor {
     private browser;
     private baseUrl;
     private screenshotDir;
+    private testAccount;
+    private storageState;
     constructor(baseUrl: string, screenshotDir?: string);
+    setTestAccount(account: TestAccount | null): void;
     initialize(): Promise<void>;
+    /**
+     * Authenticate using the configured test account.
+     * Saves session state to reuse across flows.
+     */
+    private authenticate;
     cleanup(): Promise<void>;
     executeFlow(flow: FlowPlan): Promise<ResultPayload>;
     private executeStep;
@@ -17,5 +25,5 @@ export declare class PlaywrightExecutor {
     private smartLocator;
     private singleLocator;
 }
-export declare function executeFlows(flows: FlowPlan[], baseUrl: string, maxDurationMs?: number): Promise<ResultPayload[]>;
+export declare function executeFlows(flows: FlowPlan[], baseUrl: string, maxDurationMs?: number, testAccount?: TestAccount | null): Promise<ResultPayload[]>;
 //# sourceMappingURL=playwright.d.ts.map

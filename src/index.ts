@@ -48,6 +48,11 @@ async function run(): Promise<void> {
     const apiEndpoint = core.getInput('api-endpoint') || 'https://scoutai-api.onrender.com';
     let projectId = core.getInput('project-id');
 
+    // Auth inputs (optional - can also be configured via API)
+    const authUsername = core.getInput('auth-username');
+    const authPassword = core.getInput('auth-password');
+    const authLoginUrl = core.getInput('auth-login-url') || '/login';
+
     core.info(`ScoutAI QA - Mode: ${mode}`);
     core.info(`Base URL: ${baseUrl}`);
     core.info(`API Endpoint: ${apiEndpoint}`);
@@ -145,6 +150,35 @@ async function run(): Promise<void> {
     // Mark run as started
     await client.startRun(runId);
 
+    // Determine test account for authentication
+    // Priority: 1) Action inputs, 2) API-configured account
+    let testAccount = null;
+
+    if (authUsername && authPassword) {
+      // Use credentials from action inputs
+      core.info(`Using auth credentials from action inputs`);
+      testAccount = {
+        id: 'input-auth',
+        name: 'Action Input Auth',
+        role: 'user',
+        email: authUsername,
+        password: authPassword,
+        auth_type: 'form' as const,
+        login_url: authLoginUrl,
+        is_default: true,
+        is_active: true,
+      };
+    } else {
+      // Try to fetch from API
+      core.info('Checking for test account in API...');
+      testAccount = await client.getDefaultTestAccount(projectId);
+      if (testAccount) {
+        core.info(`Found test account: ${testAccount.name} (${testAccount.role})`);
+      } else {
+        core.info('No test account configured - running without authentication');
+      }
+    }
+
     // Create screenshots directory
     const screenshotDir = './scoutai-screenshots';
     if (!fs.existsSync(screenshotDir)) {
@@ -155,7 +189,7 @@ async function run(): Promise<void> {
     const maxDuration = mode === 'fast' ? 55000 : 9 * 60 * 1000; // 55s for fast, 9min for deep
     core.info(`Executing flows (max ${maxDuration / 1000}s)...`);
 
-    const results = await executeFlows(testPlan.flows, baseUrl, maxDuration);
+    const results = await executeFlows(testPlan.flows, baseUrl, maxDuration, testAccount);
 
     // Calculate summary
     const summary = calculateSummary(results);

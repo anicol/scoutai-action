@@ -69,6 +69,22 @@ export interface Project {
   base_url?: string;
 }
 
+export interface TestAccount {
+  id: string;
+  name: string;
+  role: string;
+  email: string;
+  password: string;  // Only returned for authenticated requests
+  auth_type: 'form' | 'oauth' | 'api_key' | 'basic';
+  login_url: string;
+  email_selector?: string;
+  password_selector?: string;
+  submit_selector?: string;
+  success_indicator?: string;
+  is_default: boolean;
+  is_active: boolean;
+}
+
 export class ScoutAIClient {
   private apiKey: string;
   private baseUrl: string;
@@ -152,5 +168,24 @@ export class ScoutAIClient {
     await this.request('POST', `/api/runs/${runId}/results/`, {
       results,
     });
+  }
+
+  async getDefaultTestAccount(projectId: string): Promise<TestAccount | null> {
+    try {
+      return await this.request<TestAccount>(
+        'GET',
+        `/api/projects/${projectId}/test-accounts/default/`
+      );
+    } catch (error) {
+      // No test account configured - that's okay
+      return null;
+    }
+  }
+
+  async getTestAccounts(projectId: string): Promise<TestAccount[]> {
+    return this.request<TestAccount[]>(
+      'GET',
+      `/api/projects/${projectId}/test-accounts/`
+    );
   }
 }

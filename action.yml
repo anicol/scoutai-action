@@ -24,6 +24,16 @@ inputs:
   project-id:
     description: 'ScoutAI project ID (auto-detected from repo if not provided)'
     required: false
+  auth-username:
+    description: 'Username/email for test account authentication (overrides API config)'
+    required: false
+  auth-password:
+    description: 'Password for test account authentication'
+    required: false
+  auth-login-url:
+    description: 'Login page URL path (default: /login)'
+    required: false
+    default: '/login'
 
 outputs:
   run-id:

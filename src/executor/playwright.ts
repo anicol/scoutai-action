@@ -1,15 +1,21 @@
 import * as core from '@actions/core';
-import { chromium, Browser, Page } from 'playwright';
-import { FlowPlan, PlaywrightStep, ResultPayload, StepResult } from '../api/client';
+import { chromium, Browser, Page, BrowserContext } from 'playwright';
+import { FlowPlan, PlaywrightStep, ResultPayload, StepResult, TestAccount } from '../api/client';
 
 export class PlaywrightExecutor {
   private browser: Browser | null = null;
   private baseUrl: string;
   private screenshotDir: string;
+  private testAccount: TestAccount | null = null;
+  private storageState: string | null = null;
 
   constructor(baseUrl: string, screenshotDir: string = './screenshots') {
     this.baseUrl = baseUrl;
     this.screenshotDir = screenshotDir;
+  }
+
+  setTestAccount(account: TestAccount | null) {
+    this.testAccount = account;
   }
 
   async initialize(): Promise<void> {
@@ -17,6 +23,77 @@ export class PlaywrightExecutor {
     this.browser = await chromium.launch({
       headless: true,
     });
+
+    // If we have a test account, authenticate and save the session
+    if (this.testAccount) {
+      await this.authenticate();
+    }
+  }
+
+  /**
+   * Authenticate using the configured test account.
+   * Saves session state to reuse across flows.
+   */
+  private async authenticate(): Promise<void> {
+    if (!this.browser || !this.testAccount) return;
+
+    const account = this.testAccount;
+    core.info(`Authenticating as ${account.name} (${account.role})...`);
+
+    const context = await this.browser.newContext({
+      viewport: { width: 1280, height: 720 },
+    });
+    const page = await context.newPage();
+
+    try {
+      // Navigate to login page
+      const loginUrl = account.login_url.startsWith('http')
+        ? account.login_url
+        : `${this.baseUrl}${account.login_url}`;
+      await page.goto(loginUrl, { waitUntil: 'networkidle', timeout: 15000 });
+
+      // Fill email - use configured selector or try common patterns
+      const emailSelector = account.email_selector ||
+        'input[type="email"], input[name="email"], input[id="email"], [placeholder*="email" i]';
+      await page.locator(emailSelector).first().fill(account.email, { timeout: 5000 });
+
+      // Fill password
+      const passwordSelector = account.password_selector ||
+        'input[type="password"], input[name="password"], input[id="password"]';
+      await page.locator(passwordSelector).first().fill(account.password, { timeout: 5000 });
+
+      // Submit form
+      const submitSelector = account.submit_selector ||
+        'button[type="submit"], input[type="submit"], button:has-text("Log in"), button:has-text("Sign in")';
+      await page.locator(submitSelector).first().click({ timeout: 5000 });
+
+      // Wait for navigation/login to complete
+      await page.waitForLoadState('networkidle', { timeout: 10000 });
+
+      // Verify login succeeded if indicator is configured
+      if (account.success_indicator) {
+        if (account.success_indicator.startsWith('/')) {
+          // URL pattern
+          await page.waitForURL(`**${account.success_indicator}*`, { timeout: 10000 });
+        } else {
+          // Selector
+          await page.locator(account.success_indicator).waitFor({ state: 'visible', timeout: 10000 });
+        }
+      }
+
+      // Save storage state (cookies, localStorage) for reuse
+      this.storageState = './scoutai-auth-state.json';
+      await context.storageState({ path: this.storageState });
+      core.info(`  ✓ Authenticated successfully as ${account.name}`);
+
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      core.warning(`  ✗ Authentication failed: ${msg}`);
+      core.warning('  Continuing without authentication...');
+      this.storageState = null;
+    } finally {
+      await context.close();
+    }
   }
 
   async cleanup(): Promise<void> {
@@ -37,12 +114,14 @@ export class PlaywrightExecutor {
     let flowStatus: 'passed' | 'failed' = 'passed';
     let errorMessage: string | undefined;
 
+    // Use saved auth state if available
     const context = await this.browser.newContext({
       viewport: { width: 1280, height: 720 },
+      ...(this.storageState ? { storageState: this.storageState } : {}),
     });
     const page = await context.newPage();
 
-    core.info(`Executing flow: ${flow.name}`);
+    core.info(`Executing flow: ${flow.name}${this.storageState ? ' (authenticated)' : ''}`);
 
     try {
       for (let i = 0; i < flow.steps.length; i++) {
@@ -187,9 +266,12 @@ export class PlaywrightExecutor {
 export async function executeFlows(
   flows: FlowPlan[],
   baseUrl: string,
-  maxDurationMs: number = 60000
+  maxDurationMs: number = 60000,
+  testAccount: TestAccount | null = null
 ): Promise<ResultPayload[]> {
   const executor = new PlaywrightExecutor(baseUrl);
+  executor.setTestAccount(testAccount);
+
   const results: ResultPayload[] = [];
   const startTime = Date.now();
 
