@@ -122,16 +122,38 @@ export async function crawlPage(url: string): Promise<PageContext> {
           const name = input.getAttribute('name') || '';
           const type = input.getAttribute('type') || (input.tagName === 'TEXTAREA' ? 'textarea' : 'text');
           const placeholder = input.getAttribute('placeholder') || '';
+          const inputId = input.id || '';
 
+          // Try to find associated label first (most stable selector)
+          let label = '';
+          if (inputId) {
+            const labelEl = document.querySelector(`label[for="${inputId}"]`);
+            if (labelEl) label = labelEl.textContent?.trim().substring(0, 30) || '';
+          }
+          // Also check parent label
+          if (!label) {
+            const parentLabel = input.closest('label');
+            if (parentLabel) label = parentLabel.textContent?.trim().substring(0, 30) || '';
+          }
+
+          // Build selector - prefer stable attributes over IDs (React IDs like :r2: are unstable)
           let inputSelector = '';
           if (input.getAttribute('data-testid')) {
             inputSelector = `[data-testid="${input.getAttribute('data-testid')}"]`;
-          } else if (input.id) {
-            inputSelector = `#${input.id}`;
           } else if (name) {
             inputSelector = `[name="${name}"]`;
           } else if (placeholder) {
             inputSelector = `[placeholder="${placeholder}"]`;
+          } else if (label) {
+            // Use label text for getByLabel style selector
+            inputSelector = `text="${label}" >> .. >> input`;
+          } else if (type === 'email') {
+            inputSelector = `input[type="email"]`;
+          } else if (type === 'password') {
+            inputSelector = `input[type="password"]`;
+          } else if (inputId && !inputId.includes(':')) {
+            // Only use ID if it doesn't contain special CSS characters
+            inputSelector = `#${inputId}`;
           } else if (type && type !== 'hidden') {
             // Fall back to type-based selector within form context
             inputSelector = `${selector} input[type="${type}"]`;
@@ -140,18 +162,6 @@ export async function crawlPage(url: string): Promise<PageContext> {
           // Last resort: use nth selector within form
           if (!inputSelector && type !== 'hidden') {
             inputSelector = `${selector} input >> nth=${j}`;
-          }
-
-          // Try to find associated label
-          let label = '';
-          if (input.id) {
-            const labelEl = document.querySelector(`label[for="${input.id}"]`);
-            if (labelEl) label = labelEl.textContent?.trim().substring(0, 30) || '';
-          }
-          // Also check parent label
-          if (!label) {
-            const parentLabel = input.closest('label');
-            if (parentLabel) label = parentLabel.textContent?.trim().substring(0, 30) || '';
           }
 
           return { name, type, placeholder, selector: inputSelector, label };
@@ -199,14 +209,23 @@ export async function crawlPage(url: string): Promise<PageContext> {
           const name = input.getAttribute('name') || '';
           const type = input.getAttribute('type') || 'text';
           const placeholder = input.getAttribute('placeholder') || '';
+          const inputId = input.id || '';
 
+          // Prefer stable selectors over IDs
           let selector = '';
           if (input.getAttribute('data-testid')) {
             selector = `[data-testid="${input.getAttribute('data-testid')}"]`;
-          } else if (input.id) {
-            selector = `#${input.id}`;
           } else if (name) {
             selector = `[name="${name}"]`;
+          } else if (placeholder) {
+            selector = `[placeholder="${placeholder}"]`;
+          } else if (type === 'email') {
+            selector = `input[type="email"]`;
+          } else if (type === 'password') {
+            selector = `input[type="password"]`;
+          } else if (inputId && !inputId.includes(':')) {
+            // Only use ID if it doesn't contain special CSS characters
+            selector = `#${inputId}`;
           }
 
           return { name, type, placeholder, selector };

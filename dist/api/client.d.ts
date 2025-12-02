@@ -79,7 +79,7 @@ export declare class ScoutAIClient {
     private request;
     getProjectByRepo(githubRepo: string): Promise<Project | null>;
     createProject(name: string, githubRepo: string, baseUrl?: string): Promise<Project>;
-    generatePlan(projectId: string, diffMetadata: DiffMetadata, mode: 'fast' | 'deep', baseUrl: string, siteContext?: SiteContext): Promise<PlanResponse>;
+    generatePlan(projectId: string, diffMetadata: DiffMetadata, mode: 'fast' | 'deep', baseUrl: string, siteContext?: SiteContext, environment?: string, trigger?: string): Promise<PlanResponse>;
     startRun(runId: string): Promise<void>;
     completeRun(runId: string, status: 'passed' | 'failed' | 'error', summary: {
         passed: number;

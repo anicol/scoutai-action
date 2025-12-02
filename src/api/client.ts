@@ -138,7 +138,9 @@ export class ScoutAIClient {
     diffMetadata: DiffMetadata,
     mode: 'fast' | 'deep',
     baseUrl: string,
-    siteContext?: SiteContext
+    siteContext?: SiteContext,
+    environment?: string,
+    trigger?: string
   ): Promise<PlanResponse> {
     return this.request<PlanResponse>('POST', '/api/plan/', {
       project_id: projectId,
@@ -146,6 +148,8 @@ export class ScoutAIClient {
       mode,
       base_url: baseUrl,
       site_context: siteContext,
+      environment,
+      trigger,
     });
   }
 

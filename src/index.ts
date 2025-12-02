@@ -37,6 +37,25 @@ async function installPlaywright(): Promise<void> {
   await exec.exec('npx', ['playwright', 'install', 'chromium']);
 }
 
+/**
+ * Detect what triggered this run based on GitHub context
+ */
+function detectTrigger(): string {
+  const eventName = github.context.eventName;
+
+  if (eventName === 'pull_request') {
+    return 'pr';
+  } else if (eventName === 'schedule') {
+    return 'schedule';
+  } else if (eventName === 'deployment_status') {
+    return 'deployment';
+  } else if (eventName === 'workflow_dispatch') {
+    return 'manual';
+  }
+
+  return 'manual';
+}
+
 async function run(): Promise<void> {
   const startTime = Date.now();
 
@@ -53,7 +72,12 @@ async function run(): Promise<void> {
     const authPassword = core.getInput('auth-password');
     const authLoginUrl = core.getInput('auth-login-url') || '/login';
 
+    // Environment and trigger inputs
+    const environment = core.getInput('environment') || 'staging';
+    const trigger = core.getInput('trigger') || detectTrigger();
+
     core.info(`ScoutAI QA - Mode: ${mode}`);
+    core.info(`Environment: ${environment}, Trigger: ${trigger}`);
     core.info(`Base URL: ${baseUrl}`);
     core.info(`API Endpoint: ${apiEndpoint}`);
 
@@ -128,7 +152,9 @@ async function run(): Promise<void> {
       diffMetadata,
       mode,
       baseUrl,
-      siteContext
+      siteContext,
+      environment,
+      trigger
     );
 
     const { run_id: runId, test_plan: testPlan } = planResponse;

@@ -34,6 +34,14 @@ inputs:
     description: 'Login page URL path (default: /login)'
     required: false
     default: '/login'
+  environment:
+    description: 'Deployment environment: staging, production, or preview'
+    required: false
+    default: 'staging'
+  trigger:
+    description: 'What triggered this run: pr, schedule, manual, deployment, webhook'
+    required: false
+    default: 'pr'
 
 outputs:
   run-id:
