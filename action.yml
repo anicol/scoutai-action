@@ -42,6 +42,10 @@ inputs:
     description: 'What triggered this run: pr, schedule, manual, deployment, webhook'
     required: false
     default: 'pr'
+  create-issues:
+    description: 'Create GitHub Issues for test failures/regressions'
+    required: false
+    default: 'false'
 
 outputs:
   run-id:

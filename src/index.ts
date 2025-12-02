@@ -5,6 +5,7 @@ import { ScoutAIClient, ResultPayload } from './api/client';
 import { extractDiffMetadata } from './diff/extractor';
 import { executeFlows } from './executor/playwright';
 import { postPRComment, calculateSummary, setOutputs } from './reporter/github';
+import { createIssuesForFailures } from './reporter/issues';
 import { crawlSite } from './crawler';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -56,6 +57,104 @@ function detectTrigger(): string {
   return 'manual';
 }
 
+/**
+ * Detect preview URL from deployment events or PR comments.
+ * Supports: GitHub deployment_status, Vercel bot comments, Netlify.
+ */
+async function detectPreviewUrl(): Promise<string | null> {
+  const context = github.context;
+  const token = process.env.GITHUB_TOKEN;
+
+  // Check for deployment_status event with environment URL
+  if (context.eventName === 'deployment_status') {
+    const payload = context.payload as {
+      deployment_status?: {
+        environment_url?: string;
+        state?: string;
+      };
+    };
+
+    // Only use successful deployments
+    if (payload.deployment_status?.state === 'success' &&
+        payload.deployment_status?.environment_url) {
+      core.info(`Detected preview URL from deployment_status: ${payload.deployment_status.environment_url}`);
+      return payload.deployment_status.environment_url;
+    }
+  }
+
+  // For PR events, check PR comments for Vercel/Netlify bot URLs
+  if (context.eventName === 'pull_request' && token) {
+    const prNumber = context.payload.pull_request?.number;
+    if (!prNumber) return null;
+
+    try {
+      const octokit = github.getOctokit(token);
+      const { data: comments } = await octokit.rest.issues.listComments({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        issue_number: prNumber,
+        per_page: 50,
+      });
+
+      // Check for Vercel bot comment
+      const vercelComment = comments.find(c =>
+        c.user?.login === 'vercel[bot]' &&
+        c.body?.includes('Preview:')
+      );
+      if (vercelComment?.body) {
+        const match = vercelComment.body.match(/https:\/\/[^\s\)]+\.vercel\.app/);
+        if (match) {
+          core.info(`Detected Vercel preview URL from PR comment: ${match[0]}`);
+          return match[0];
+        }
+      }
+
+      // Check for Netlify bot comment
+      const netlifyComment = comments.find(c =>
+        c.user?.login === 'netlify[bot]' &&
+        c.body?.includes('Deploy Preview')
+      );
+      if (netlifyComment?.body) {
+        const match = netlifyComment.body.match(/https:\/\/[^\s\)]+\.netlify\.app/);
+        if (match) {
+          core.info(`Detected Netlify preview URL from PR comment: ${match[0]}`);
+          return match[0];
+        }
+      }
+
+      // Check for GitHub deployments on the commit
+      const commitSha = context.payload.pull_request?.head?.sha;
+      if (commitSha) {
+        const { data: deployments } = await octokit.rest.repos.listDeployments({
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+          sha: commitSha,
+          per_page: 5,
+        });
+
+        for (const deployment of deployments) {
+          const { data: statuses } = await octokit.rest.repos.listDeploymentStatuses({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            deployment_id: deployment.id,
+            per_page: 1,
+          });
+
+          const latestStatus = statuses[0];
+          if (latestStatus?.state === 'success' && latestStatus?.environment_url) {
+            core.info(`Detected preview URL from GitHub deployment: ${latestStatus.environment_url}`);
+            return latestStatus.environment_url;
+          }
+        }
+      }
+    } catch (error) {
+      core.debug(`Failed to detect preview URL: ${error}`);
+    }
+  }
+
+  return null;
+}
+
 async function run(): Promise<void> {
   const startTime = Date.now();
 
@@ -73,8 +172,9 @@ async function run(): Promise<void> {
     const authLoginUrl = core.getInput('auth-login-url') || '/login';
 
     // Environment and trigger inputs
-    const environment = core.getInput('environment') || 'staging';
+    let environment = core.getInput('environment') || 'staging';
     const trigger = core.getInput('trigger') || detectTrigger();
+    const createIssues = core.getInput('create-issues') === 'true';
 
     core.info(`ScoutAI QA - Mode: ${mode}`);
     core.info(`Environment: ${environment}, Trigger: ${trigger}`);
@@ -108,6 +208,16 @@ async function run(): Promise<void> {
       if (!baseUrl && project.base_url) {
         baseUrl = project.base_url;
         core.info(`Using base URL from project config: ${baseUrl}`);
+      }
+    }
+
+    // Try to auto-detect preview URL if no base-url provided
+    if (!baseUrl) {
+      const previewUrl = await detectPreviewUrl();
+      if (previewUrl) {
+        baseUrl = previewUrl;
+        environment = 'preview';
+        core.info(`Auto-detected preview URL: ${baseUrl}`);
       }
     }
 
@@ -254,6 +364,21 @@ async function run(): Promise<void> {
 
     // Post PR comment
     await postPRComment(testPlan, results, runId);
+
+    // Create GitHub Issues for failures if enabled
+    if (createIssues && summary.failed > 0) {
+      core.info('Creating GitHub Issues for failed flows...');
+      const issueUrls = await createIssuesForFailures(
+        results,
+        runId,
+        context.payload.pull_request?.number,
+        diffMetadata.commit_sha,
+        diffMetadata.branch
+      );
+      if (issueUrls.length > 0) {
+        core.info(`Created ${issueUrls.length} issue(s) for test failures`);
+      }
+    }
 
     // Set outputs
     setOutputs(runId, overallStatus, summary);
