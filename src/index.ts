@@ -62,7 +62,7 @@ async function run(): Promise<void> {
   try {
     // Get inputs
     const apiKey = core.getInput('api-key', { required: true });
-    const baseUrl = core.getInput('base-url', { required: true });
+    let baseUrl = core.getInput('base-url');  // Now optional - can come from project config
     const mode = core.getInput('mode') as 'fast' | 'deep' || 'fast';
     const apiEndpoint = core.getInput('api-endpoint') || 'https://scoutai-api.onrender.com';
     let projectId = core.getInput('project-id');
@@ -78,7 +78,6 @@ async function run(): Promise<void> {
 
     core.info(`ScoutAI QA - Mode: ${mode}`);
     core.info(`Environment: ${environment}, Trigger: ${trigger}`);
-    core.info(`Base URL: ${baseUrl}`);
     core.info(`API Endpoint: ${apiEndpoint}`);
 
     // Initialize client
@@ -93,6 +92,9 @@ async function run(): Promise<void> {
       let project = await client.getProjectByRepo(repoFullName);
 
       if (!project) {
+        if (!baseUrl) {
+          throw new Error('base-url is required when creating a new project. Configure it in the action or create the project in ScoutAI first.');
+        }
         core.info(`Creating new project for ${repoFullName}...`);
         project = await client.createProject(
           context.repo.repo,
@@ -101,9 +103,20 @@ async function run(): Promise<void> {
         );
       }
       projectId = project.id;
+
+      // Use project's base_url if not provided in action inputs
+      if (!baseUrl && project.base_url) {
+        baseUrl = project.base_url;
+        core.info(`Using base URL from project config: ${baseUrl}`);
+      }
+    }
+
+    if (!baseUrl) {
+      throw new Error('base-url is required. Either provide it in the action inputs or configure it in your ScoutAI project settings.');
     }
 
     core.info(`Project ID: ${projectId}`);
+    core.info(`Base URL: ${baseUrl}`);
 
     // Extract diff metadata
     core.info('Extracting diff metadata...');
