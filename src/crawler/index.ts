@@ -171,19 +171,24 @@ export async function crawlPage(url: string): Promise<PageContext> {
       });
     });
 
-    // Extract buttons
+    // Extract buttons - include type in selector to avoid ambiguity
     const buttons = await page.evaluate(() => {
       return Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"]'))
         .slice(0, 20)
         .map((btn, i) => {
           const text = btn.textContent?.trim().substring(0, 50) || btn.getAttribute('value') || '';
           const type = btn.getAttribute('type') || 'button';
+          const tagName = btn.tagName.toLowerCase();
 
           let selector = '';
           if (btn.getAttribute('data-testid')) {
             selector = `[data-testid="${btn.getAttribute('data-testid')}"]`;
           } else if (btn.id) {
             selector = `#${btn.id}`;
+          } else if (text && tagName === 'button') {
+            // Include type in selector to avoid matching multiple buttons with same text
+            // type="submit" buttons are form submissions, type="button" are regular buttons
+            selector = `button[type="${type}"]:has-text("${text.substring(0, 30)}")`;
           } else if (text) {
             selector = `button:has-text("${text.substring(0, 30)}")`;
           } else {
