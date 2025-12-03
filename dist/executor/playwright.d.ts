@@ -20,6 +20,7 @@ export declare class PlaywrightExecutor {
      * Smart locator that handles multiple selector types:
      * - If selector contains comma with mixed types (CSS + text), try each separately
      * - text="..." -> use getByText
+     * - button:has-text("...") -> use getByRole for better matching
      * - CSS selectors -> use locator()
      * - Automatically tries whitespace variants for emoji-containing selectors
      */

@@ -248,6 +248,7 @@ export class PlaywrightExecutor {
    * Smart locator that handles multiple selector types:
    * - If selector contains comma with mixed types (CSS + text), try each separately
    * - text="..." -> use getByText
+   * - button:has-text("...") -> use getByRole for better matching
    * - CSS selectors -> use locator()
    * - Automatically tries whitespace variants for emoji-containing selectors
    */
@@ -273,6 +274,18 @@ export class PlaywrightExecutor {
         }
         return locator;
       }
+    }
+
+    // For button selectors with :has-text(), use getByRole which is more robust
+    // It matches both <button> elements and elements with role="button"
+    const buttonTextMatch = selector.match(/^button(?:\[type="[^"]+"\])?:has-text\("([^"]+)"\)$/);
+    if (buttonTextMatch) {
+      const buttonText = buttonTextMatch[1];
+      // Extract just the text part (remove emojis) for getByRole matching
+      const textWithoutEmoji = buttonText.replace(/[\u{1F300}-\u{1F9FF}]\s*/gu, '').trim();
+      // Try getByRole with the text (handles both button elements and role="button")
+      // Use regex: false to do substring matching
+      return page.getByRole('button', { name: textWithoutEmoji });
     }
 
     // Get selector variants to handle whitespace issues with emojis
@@ -329,24 +342,6 @@ export class PlaywrightExecutor {
       const withoutType = selector.replace(/button\[type="[^"]+"\]/, 'button');
       if (!variants.includes(withoutType)) {
         variants.push(withoutType);
-      }
-    }
-
-    // If selector starts with button, also try without the button tag entirely
-    // (element might be a div, span, or other element styled as a button)
-    if (selector.startsWith('button')) {
-      const hasTextPart = selector.match(/:has-text\("[^"]+"\)/);
-      if (hasTextPart) {
-        // Try just the :has-text part to match any element with that text
-        const textOnlySelector = hasTextPart[0];
-        if (!variants.includes(textOnlySelector)) {
-          variants.push(textOnlySelector);
-        }
-        // Also try with role="button" for accessible buttons
-        const roleButtonSelector = `[role="button"]${textOnlySelector}`;
-        if (!variants.includes(roleButtonSelector)) {
-          variants.push(roleButtonSelector);
-        }
       }
     }
 
