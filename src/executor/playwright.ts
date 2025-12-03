@@ -323,6 +323,15 @@ export class PlaywrightExecutor {
       }
     }
 
+    // If selector has button[type="..."], also try without the type constraint
+    // as a fallback (buttons may not have explicit type attribute)
+    if (selector.includes('button[type=')) {
+      const withoutType = selector.replace(/button\[type="[^"]+"\]/, 'button');
+      if (!variants.includes(withoutType)) {
+        variants.push(withoutType);
+      }
+    }
+
     return variants;
   }
 
