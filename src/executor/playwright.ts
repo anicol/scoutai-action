@@ -283,9 +283,9 @@ export class PlaywrightExecutor {
       const buttonText = buttonTextMatch[1];
       // Extract just the text part (remove emojis) for getByRole matching
       const textWithoutEmoji = buttonText.replace(/[\u{1F300}-\u{1F9FF}]\s*/gu, '').trim();
-      // Try getByRole with the text (handles both button elements and role="button")
-      // Use regex: false to do substring matching
-      return page.getByRole('button', { name: textWithoutEmoji });
+      // Use exact: true to avoid matching buttons that just contain this text as a substring
+      // e.g., "Sign In" should not match "Sign in with email link instead"
+      return page.getByRole('button', { name: textWithoutEmoji, exact: true });
     }
 
     // Get selector variants to handle whitespace issues with emojis
