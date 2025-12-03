@@ -21,8 +21,14 @@ export declare class PlaywrightExecutor {
      * - If selector contains comma with mixed types (CSS + text), try each separately
      * - text="..." -> use getByText
      * - CSS selectors -> use locator()
+     * - Automatically tries whitespace variants for emoji-containing selectors
      */
     private smartLocator;
+    /**
+     * Generate alternative selectors to handle whitespace issues.
+     * Returns array of selectors to try in order.
+     */
+    private getSelectorVariants;
     private singleLocator;
 }
 export declare function executeFlows(flows: FlowPlan[], baseUrl: string, maxDurationMs?: number, testAccount?: TestAccount | null, viewports?: string[]): Promise<ResultPayload[]>;

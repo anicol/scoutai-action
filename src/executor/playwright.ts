@@ -249,6 +249,7 @@ export class PlaywrightExecutor {
    * - If selector contains comma with mixed types (CSS + text), try each separately
    * - text="..." -> use getByText
    * - CSS selectors -> use locator()
+   * - Automatically tries whitespace variants for emoji-containing selectors
    */
   private smartLocator(page: Page, selector: string) {
     // If it's a simple text selector like text="Login"
@@ -274,8 +275,50 @@ export class PlaywrightExecutor {
       }
     }
 
+    // Get selector variants to handle whitespace issues with emojis
+    const variants = this.getSelectorVariants(selector);
+
+    if (variants.length > 1) {
+      // Build locator chain with .or() to try all variants
+      let locator = page.locator(variants[0]);
+      for (let i = 1; i < variants.length; i++) {
+        locator = locator.or(page.locator(variants[i]));
+      }
+      return locator;
+    }
+
     // Standard CSS/Playwright selector
     return page.locator(selector);
+  }
+
+  /**
+   * Generate alternative selectors to handle whitespace issues.
+   * Returns array of selectors to try in order.
+   */
+  private getSelectorVariants(selector: string): string[] {
+    const variants = [selector];
+
+    // Match :has-text("...") patterns
+    const hasTextMatch = selector.match(/:has-text\("([^"]+)"\)/);
+    if (hasTextMatch) {
+      const textContent = hasTextMatch[1];
+      // Check if text has emoji that might have whitespace issues
+      const hasEmoji = /[\u{1F300}-\u{1F9FF}]/u.test(textContent);
+      if (hasEmoji) {
+        // Try adding space after emoji: "🍔Restaurant" -> "🍔 Restaurant"
+        const withSpace = textContent.replace(/([\u{1F300}-\u{1F9FF}])(\w)/gu, '$1 $2');
+        if (withSpace !== textContent) {
+          variants.push(selector.replace(`:has-text("${textContent}")`, `:has-text("${withSpace}")`));
+        }
+        // Try removing space after emoji: "🍔 Restaurant" -> "🍔Restaurant"
+        const withoutSpace = textContent.replace(/([\u{1F300}-\u{1F9FF}])\s+/gu, '$1');
+        if (withoutSpace !== textContent) {
+          variants.push(selector.replace(`:has-text("${textContent}")`, `:has-text("${withoutSpace}")`));
+        }
+      }
+    }
+
+    return variants;
   }
 
   private singleLocator(page: Page, selector: string) {
