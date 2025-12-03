@@ -332,6 +332,24 @@ export class PlaywrightExecutor {
       }
     }
 
+    // If selector starts with button, also try without the button tag entirely
+    // (element might be a div, span, or other element styled as a button)
+    if (selector.startsWith('button')) {
+      const hasTextPart = selector.match(/:has-text\("[^"]+"\)/);
+      if (hasTextPart) {
+        // Try just the :has-text part to match any element with that text
+        const textOnlySelector = hasTextPart[0];
+        if (!variants.includes(textOnlySelector)) {
+          variants.push(textOnlySelector);
+        }
+        // Also try with role="button" for accessible buttons
+        const roleButtonSelector = `[role="button"]${textOnlySelector}`;
+        if (!variants.includes(roleButtonSelector)) {
+          variants.push(roleButtonSelector);
+        }
+      }
+    }
+
     return variants;
   }
 
