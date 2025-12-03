@@ -25,7 +25,7 @@ export declare class PlaywrightExecutor {
      */
     private smartLocator;
     /**
-     * Generate alternative selectors to handle whitespace issues.
+     * Generate alternative selectors to handle whitespace/emoji issues.
      * Returns array of selectors to try in order.
      */
     private getSelectorVariants;

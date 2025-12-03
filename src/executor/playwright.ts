@@ -292,7 +292,7 @@ export class PlaywrightExecutor {
   }
 
   /**
-   * Generate alternative selectors to handle whitespace issues.
+   * Generate alternative selectors to handle whitespace/emoji issues.
    * Returns array of selectors to try in order.
    */
   private getSelectorVariants(selector: string): string[] {
@@ -314,6 +314,11 @@ export class PlaywrightExecutor {
         const withoutSpace = textContent.replace(/([\u{1F300}-\u{1F9FF}])\s+/gu, '$1');
         if (withoutSpace !== textContent) {
           variants.push(selector.replace(`:has-text("${textContent}")`, `:has-text("${withoutSpace}")`));
+        }
+        // Try matching just the text part without emoji (most flexible)
+        const textOnly = textContent.replace(/[\u{1F300}-\u{1F9FF}]\s*/gu, '').trim();
+        if (textOnly && textOnly !== textContent) {
+          variants.push(selector.replace(`:has-text("${textContent}")`, `:has-text("${textOnly}")`));
         }
       }
     }
