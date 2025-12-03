@@ -176,7 +176,9 @@ export async function crawlPage(url: string): Promise<PageContext> {
       return Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"]'))
         .slice(0, 20)
         .map((btn, i) => {
-          const text = btn.textContent?.trim().substring(0, 50) || btn.getAttribute('value') || '';
+          // Normalize whitespace - replace newlines/multiple spaces with single space
+          const rawText = btn.textContent?.trim() || btn.getAttribute('value') || '';
+          const text = rawText.replace(/\s+/g, ' ').substring(0, 50);
           const type = btn.getAttribute('type') || 'button';
           const tagName = btn.tagName.toLowerCase();
 
