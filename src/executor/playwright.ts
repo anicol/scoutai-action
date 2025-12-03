@@ -281,11 +281,20 @@ export class PlaywrightExecutor {
     const buttonTextMatch = selector.match(/^button(?:\[type="[^"]+"\])?:has-text\("([^"]+)"\)$/);
     if (buttonTextMatch) {
       const buttonText = buttonTextMatch[1];
+      // Check if text contains emoji
+      const hasEmoji = /[\u{1F300}-\u{1F9FF}]/u.test(buttonText);
       // Extract just the text part (remove emojis) for getByRole matching
       const textWithoutEmoji = buttonText.replace(/[\u{1F300}-\u{1F9FF}]\s*/gu, '').trim();
-      // Use exact: true to avoid matching buttons that just contain this text as a substring
-      // e.g., "Sign In" should not match "Sign in with email link instead"
-      return page.getByRole('button', { name: textWithoutEmoji, exact: true });
+
+      if (hasEmoji) {
+        // If original had emoji, don't use exact match since accessible name may include emoji
+        // e.g., "🍔 Restaurant" - we search for "Restaurant" without exact
+        return page.getByRole('button', { name: textWithoutEmoji });
+      } else {
+        // No emoji - use exact: true to avoid substring matches
+        // e.g., "Sign In" should not match "Sign in with email link instead"
+        return page.getByRole('button', { name: textWithoutEmoji, exact: true });
+      }
     }
 
     // Get selector variants to handle whitespace issues with emojis
