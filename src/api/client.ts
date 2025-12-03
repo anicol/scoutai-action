@@ -53,6 +53,7 @@ export interface ResultPayload {
   error_message?: string;
   steps: StepResult[];
   screenshot_urls: string[];
+  viewport?: string;  // 'desktop' | 'mobile'
 }
 
 export interface StepResult {

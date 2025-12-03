@@ -2,6 +2,17 @@ import * as core from '@actions/core';
 import { chromium, Browser, Page, BrowserContext } from 'playwright';
 import { FlowPlan, PlaywrightStep, ResultPayload, StepResult, TestAccount } from '../api/client';
 
+// Supported viewports for testing
+const VIEWPORTS = {
+  desktop: { width: 1280, height: 720 },
+  mobile: { width: 375, height: 667 },  // iPhone SE
+};
+
+// Mobile user agent for more realistic mobile testing
+const MOBILE_USER_AGENT =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) ' +
+  'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1';
+
 export class PlaywrightExecutor {
   private browser: Browser | null = null;
   private baseUrl: string;
@@ -103,7 +114,7 @@ export class PlaywrightExecutor {
     }
   }
 
-  async executeFlow(flow: FlowPlan): Promise<ResultPayload> {
+  async executeFlow(flow: FlowPlan, viewport: string = 'desktop'): Promise<ResultPayload> {
     if (!this.browser) {
       throw new Error('Browser not initialized');
     }
@@ -114,14 +125,27 @@ export class PlaywrightExecutor {
     let flowStatus: 'passed' | 'failed' = 'passed';
     let errorMessage: string | undefined;
 
+    // Get viewport settings
+    const vp = VIEWPORTS[viewport as keyof typeof VIEWPORTS] || VIEWPORTS.desktop;
+
     // Use saved auth state if available
-    const context = await this.browser.newContext({
-      viewport: { width: 1280, height: 720 },
+    const contextOptions: any = {
+      viewport: vp,
       ...(this.storageState ? { storageState: this.storageState } : {}),
-    });
+    };
+
+    // Add mobile-specific settings
+    if (viewport === 'mobile') {
+      contextOptions.userAgent = MOBILE_USER_AGENT;
+      contextOptions.isMobile = true;
+      contextOptions.hasTouch = true;
+    }
+
+    const context = await this.browser.newContext(contextOptions);
     const page = await context.newPage();
 
-    core.info(`Executing flow: ${flow.name}${this.storageState ? ' (authenticated)' : ''}`);
+    const viewportLabel = viewport !== 'desktop' ? ` [${viewport}]` : '';
+    core.info(`Executing flow: ${flow.name}${viewportLabel}${this.storageState ? ' (authenticated)' : ''}`);
 
     try {
       for (let i = 0; i < flow.steps.length; i++) {
@@ -148,8 +172,8 @@ export class PlaywrightExecutor {
           flowStatus = 'failed';
           errorMessage = `Step failed: ${step.description} - ${errorMsg}`;
 
-          // Take screenshot on failure
-          const screenshotPath = `${this.screenshotDir}/${flow.id}-failure-${i}.png`;
+          // Take screenshot on failure (include viewport in filename)
+          const screenshotPath = `${this.screenshotDir}/${flow.id}-${viewport}-failure-${i}.png`;
           await page.screenshot({ path: screenshotPath, fullPage: true });
           screenshotUrls.push(screenshotPath);
 
@@ -159,7 +183,7 @@ export class PlaywrightExecutor {
 
       // Take final screenshot if passed
       if (flowStatus === 'passed') {
-        const screenshotPath = `${this.screenshotDir}/${flow.id}-final.png`;
+        const screenshotPath = `${this.screenshotDir}/${flow.id}-${viewport}-final.png`;
         await page.screenshot({ path: screenshotPath, fullPage: true });
         screenshotUrls.push(screenshotPath);
       }
@@ -174,6 +198,7 @@ export class PlaywrightExecutor {
       error_message: errorMessage,
       steps: stepResults,
       screenshot_urls: screenshotUrls,
+      viewport: viewport,
     };
   }
 
@@ -267,7 +292,8 @@ export async function executeFlows(
   flows: FlowPlan[],
   baseUrl: string,
   maxDurationMs: number = 60000,
-  testAccount: TestAccount | null = null
+  testAccount: TestAccount | null = null,
+  viewports: string[] = ['desktop']
 ): Promise<ResultPayload[]> {
   const executor = new PlaywrightExecutor(baseUrl);
   executor.setTestAccount(testAccount);
@@ -281,16 +307,28 @@ export async function executeFlows(
     // Sort flows by priority (higher first)
     const sortedFlows = [...flows].sort((a, b) => b.priority - a.priority);
 
-    for (const flow of sortedFlows) {
-      // Check if we're running out of time
-      const elapsed = Date.now() - startTime;
-      if (elapsed > maxDurationMs) {
-        core.warning(`Time limit reached, skipping remaining flows`);
-        break;
+    // Execute each flow for each viewport
+    for (const viewport of viewports) {
+      const vp = VIEWPORTS[viewport as keyof typeof VIEWPORTS] || VIEWPORTS.desktop;
+      core.info(`Testing with viewport: ${viewport} (${vp.width}x${vp.height})`);
+
+      for (const flow of sortedFlows) {
+        // Check if we're running out of time
+        const elapsed = Date.now() - startTime;
+        if (elapsed > maxDurationMs) {
+          core.warning(`Time limit reached, skipping remaining flows`);
+          break;
+        }
+
+        const result = await executor.executeFlow(flow, viewport);
+        results.push(result);
       }
 
-      const result = await executor.executeFlow(flow);
-      results.push(result);
+      // Check time limit after each viewport
+      const elapsed = Date.now() - startTime;
+      if (elapsed > maxDurationMs) {
+        break;
+      }
     }
   } finally {
     await executor.cleanup();

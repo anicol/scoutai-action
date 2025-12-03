@@ -1,14 +1,123 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 import * as exec from '@actions/exec';
-import { ScoutAIClient, ResultPayload } from './api/client';
+import { ScoutAIClient, ResultPayload, DiffFile } from './api/client';
 import { extractDiffMetadata } from './diff/extractor';
 import { executeFlows } from './executor/playwright';
-import { postPRComment, calculateSummary, setOutputs } from './reporter/github';
+import { postPRComment, postSkippedPRComment, calculateSummary, setOutputs } from './reporter/github';
 import { createIssuesForFailures } from './reporter/issues';
 import { crawlSite } from './crawler';
 import * as fs from 'fs';
 import * as path from 'path';
+
+/**
+ * File categories for determining test relevance
+ */
+interface FileCategories {
+  ui: DiffFile[];
+  api: DiffFile[];
+  logic: DiffFile[];
+  config: DiffFile[];
+  infra: DiffFile[];
+  test: DiffFile[];
+  docs: DiffFile[];
+}
+
+/**
+ * Categorize changed files to determine what type of testing is needed
+ */
+function categorizeChangedFiles(files: DiffFile[]): FileCategories {
+  const categories: FileCategories = {
+    ui: [],
+    api: [],
+    logic: [],
+    config: [],
+    infra: [],
+    test: [],
+    docs: [],
+  };
+
+  const uiExtensions = ['.tsx', '.jsx', '.vue', '.svelte', '.html', '.css', '.scss', '.sass', '.less'];
+  const apiPatterns = ['routes', 'controllers', 'handlers', 'views', 'api/', 'endpoints'];
+  const infraPatterns = [
+    '.github/', 'dockerfile', 'docker-compose', 'terraform', '.gitlab-ci',
+    'jenkinsfile', 'circleci', '.travis', 'azure-pipelines', 'bitbucket-pipelines',
+    'render.yaml', 'vercel.json', 'netlify.toml', 'railway.json', 'fly.toml'
+  ];
+  const testPatterns = ['test', 'spec', '__tests__', 'e2e', 'cypress', 'playwright'];
+
+  for (const file of files) {
+    const pathLower = file.path.toLowerCase();
+
+    // Infrastructure files (highest priority - check first)
+    if (infraPatterns.some(p => pathLower.includes(p))) {
+      categories.infra.push(file);
+    }
+    // Documentation
+    else if (pathLower.endsWith('.md') || pathLower.startsWith('docs/') || pathLower.includes('/docs/')) {
+      categories.docs.push(file);
+    }
+    // Test files
+    else if (testPatterns.some(p => pathLower.includes(p))) {
+      categories.test.push(file);
+    }
+    // UI files
+    else if (uiExtensions.some(ext => pathLower.endsWith(ext))) {
+      categories.ui.push(file);
+    }
+    // API files
+    else if (apiPatterns.some(p => pathLower.includes(p))) {
+      categories.api.push(file);
+    }
+    // Config files (non-infra)
+    else if (['.json', '.yml', '.yaml', '.toml', '.env'].some(ext => pathLower.endsWith(ext))) {
+      categories.config.push(file);
+    }
+    // Default to logic
+    else {
+      categories.logic.push(file);
+    }
+  }
+
+  return categories;
+}
+
+/**
+ * Check if the change is infrastructure/docs only (no user-facing changes)
+ */
+function isInfraOnlyChange(categories: FileCategories): boolean {
+  const hasInfra = categories.infra.length > 0;
+  const hasDocs = categories.docs.length > 0;
+  const hasTest = categories.test.length > 0;
+
+  const userFacingCount =
+    categories.ui.length +
+    categories.api.length +
+    categories.logic.length +
+    categories.config.length;
+
+  // Skip tests if ONLY infra/docs/test files changed
+  return userFacingCount === 0 && (hasInfra || hasDocs || hasTest);
+}
+
+/**
+ * Get a human-readable description of what changed
+ */
+function getChangeDescription(categories: FileCategories): string {
+  const parts: string[] = [];
+
+  if (categories.infra.length > 0) {
+    parts.push(`${categories.infra.length} infrastructure file(s)`);
+  }
+  if (categories.docs.length > 0) {
+    parts.push(`${categories.docs.length} documentation file(s)`);
+  }
+  if (categories.test.length > 0) {
+    parts.push(`${categories.test.length} test file(s)`);
+  }
+
+  return parts.join(', ');
+}
 
 /**
  * Convert local screenshot paths to base64 data URLs
@@ -175,6 +284,9 @@ async function run(): Promise<void> {
     let environment = core.getInput('environment') || 'staging';
     const trigger = core.getInput('trigger') || detectTrigger();
     const createIssues = core.getInput('create-issues') === 'true';
+    const skipInfraOnly = core.getInput('skip-infra-only') !== 'false'; // Default true
+    const viewportsInput = core.getInput('viewports') || 'desktop';
+    const viewports = viewportsInput.split(',').map(v => v.trim()).filter(v => ['desktop', 'mobile'].includes(v));
 
     core.info(`ScoutAI QA - Mode: ${mode}`);
     core.info(`Environment: ${environment}, Trigger: ${trigger}`);
@@ -241,6 +353,27 @@ async function run(): Promise<void> {
       if (diffMetadata.files.length > 10) {
         core.debug(`  ... and ${diffMetadata.files.length - 10} more`);
       }
+    }
+
+    // Categorize files and check for infra-only changes
+    const categories = categorizeChangedFiles(diffMetadata.files);
+    const infraOnly = isInfraOnlyChange(categories);
+
+    core.info(`File categories: UI=${categories.ui.length}, API=${categories.api.length}, Logic=${categories.logic.length}, ` +
+              `Config=${categories.config.length}, Infra=${categories.infra.length}, Test=${categories.test.length}, Docs=${categories.docs.length}`);
+
+    // Skip tests for infrastructure-only changes if enabled
+    if (skipInfraOnly && infraOnly && diffMetadata.files.length > 0) {
+      const changeDesc = getChangeDescription(categories);
+      core.info(`Infrastructure-only change detected (${changeDesc}) - skipping user-facing tests`);
+
+      // Post a minimal PR comment explaining the skip
+      await postSkippedPRComment(changeDesc, diffMetadata.files);
+
+      // Set outputs for skipped run
+      setOutputs('skipped', 'passed', { passed: 0, failed: 0, skipped: 0, duration_ms: 0 });
+      core.info('ScoutAI QA: Skipped - no user-facing changes detected');
+      return;
     }
 
     // Install Playwright browsers (needed for crawling)
@@ -338,7 +471,7 @@ async function run(): Promise<void> {
     const maxDuration = mode === 'fast' ? 55000 : 9 * 60 * 1000; // 55s for fast, 9min for deep
     core.info(`Executing flows (max ${maxDuration / 1000}s)...`);
 
-    const results = await executeFlows(testPlan.flows, baseUrl, maxDuration, testAccount);
+    const results = await executeFlows(testPlan.flows, baseUrl, maxDuration, testAccount, viewports);
 
     // Calculate summary
     const summary = calculateSummary(results);

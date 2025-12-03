@@ -46,6 +46,14 @@ inputs:
     description: 'Create GitHub Issues for test failures/regressions'
     required: false
     default: 'false'
+  skip-infra-only:
+    description: 'Skip tests when only infrastructure/CI files changed (e.g., .github/, Dockerfile)'
+    required: false
+    default: 'true'
+  viewports:
+    description: 'Viewports to test: desktop, mobile, or both (comma-separated)'
+    required: false
+    default: 'desktop'
 
 outputs:
   run-id:

@@ -14,7 +14,7 @@ export declare class PlaywrightExecutor {
      */
     private authenticate;
     cleanup(): Promise<void>;
-    executeFlow(flow: FlowPlan): Promise<ResultPayload>;
+    executeFlow(flow: FlowPlan, viewport?: string): Promise<ResultPayload>;
     private executeStep;
     /**
      * Smart locator that handles multiple selector types:
@@ -25,5 +25,5 @@ export declare class PlaywrightExecutor {
     private smartLocator;
     private singleLocator;
 }
-export declare function executeFlows(flows: FlowPlan[], baseUrl: string, maxDurationMs?: number, testAccount?: TestAccount | null): Promise<ResultPayload[]>;
+export declare function executeFlows(flows: FlowPlan[], baseUrl: string, maxDurationMs?: number, testAccount?: TestAccount | null, viewports?: string[]): Promise<ResultPayload[]>;
 //# sourceMappingURL=playwright.d.ts.map

@@ -44,6 +44,7 @@ export interface ResultPayload {
     error_message?: string;
     steps: StepResult[];
     screenshot_urls: string[];
+    viewport?: string;
 }
 export interface StepResult {
     description: string;

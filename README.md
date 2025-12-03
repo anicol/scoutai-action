@@ -106,6 +106,18 @@ jobs:
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
+### Multi-Viewport Testing (Desktop + Mobile)
+
+```yaml
+- uses: anicol/scoutai-action@v1
+  with:
+    api-key: ${{ secrets.SCOUTAI_API_KEY }}
+    base-url: https://staging.example.com
+    viewports: desktop,mobile  # Test on both desktop and iPhone SE viewport
+  env:
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
 ### Nightly Deep Exploration
 
 ```yaml
@@ -126,6 +138,7 @@ jobs:
           base-url: https://staging.example.com
           mode: deep
           create-issues: true
+          viewports: desktop,mobile
           environment: staging
           trigger: schedule
         env:
@@ -147,6 +160,8 @@ jobs:
 | `environment` | No | `staging` | Environment: `staging`, `production`, or `preview` |
 | `trigger` | No | auto | What triggered the run: `pr`, `schedule`, `manual`, `deployment` |
 | `create-issues` | No | `false` | Create GitHub Issues for test failures |
+| `skip-infra-only` | No | `true` | Skip tests when only infrastructure files changed (e.g., .github/, Dockerfile) |
+| `viewports` | No | `desktop` | Viewports to test: `desktop`, `mobile`, or `desktop,mobile` for both |
 
 ## Outputs
 
