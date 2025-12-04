@@ -37,6 +37,9 @@ export interface InputInfo {
 export declare function crawlPage(url: string): Promise<PageContext>;
 /**
  * Crawl multiple pages to build a site map.
+ * @param baseUrl - The base URL to start crawling from
+ * @param maxPages - Maximum number of pages to crawl
+ * @param priorityPaths - URL paths to crawl first (e.g., ['/dashboard/multi-store'])
  */
-export declare function crawlSite(baseUrl: string, maxPages?: number): Promise<PageContext[]>;
+export declare function crawlSite(baseUrl: string, maxPages?: number, priorityPaths?: string[]): Promise<PageContext[]>;
 //# sourceMappingURL=index.d.ts.map

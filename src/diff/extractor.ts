@@ -96,3 +96,68 @@ function mapFileStatus(status: string): DiffFile['status'] {
       return 'modified';
   }
 }
+
+/**
+ * Extract likely URL paths from changed file paths.
+ * Maps common file naming conventions to URL routes.
+ *
+ * Examples:
+ * - src/pages/Dashboard/MultiStore.tsx -> /dashboard/multi-store
+ * - app/dashboard/settings/page.tsx -> /dashboard/settings
+ * - components/StorePerformance.tsx -> (no URL, component only)
+ */
+export function extractLikelyUrls(files: DiffFile[]): string[] {
+  const urls = new Set<string>();
+
+  for (const file of files) {
+    const path = file.path.toLowerCase();
+
+    // Skip non-UI files
+    if (!path.match(/\.(tsx?|jsx?|vue|svelte)$/)) continue;
+    // Skip test files
+    if (path.includes('test') || path.includes('spec') || path.includes('__tests__')) continue;
+
+    // Next.js app router: app/dashboard/settings/page.tsx -> /dashboard/settings
+    const appRouterMatch = path.match(/app\/(.+?)\/page\.(tsx?|jsx?)$/);
+    if (appRouterMatch) {
+      const route = '/' + appRouterMatch[1].replace(/\[([^\]]+)\]/g, ':$1');
+      urls.add(route);
+      continue;
+    }
+
+    // Next.js pages router: pages/dashboard/index.tsx -> /dashboard
+    const pagesMatch = path.match(/pages\/(.+?)\.(tsx?|jsx?)$/);
+    if (pagesMatch) {
+      let route = '/' + pagesMatch[1].replace(/\/index$/, '').replace(/\[([^\]]+)\]/g, ':$1');
+      if (route === '/') route = '/';
+      urls.add(route);
+      continue;
+    }
+
+    // Generic: src/pages/Dashboard/MultiStore.tsx -> /dashboard/multi-store
+    const genericPagesMatch = path.match(/(?:src\/)?(?:pages|views|screens)\/(.+?)\.(tsx?|jsx?|vue|svelte)$/);
+    if (genericPagesMatch) {
+      // Convert PascalCase/camelCase to kebab-case
+      const route = '/' + genericPagesMatch[1]
+        .replace(/([a-z])([A-Z])/g, '$1-$2')
+        .replace(/[/\\]/g, '/')
+        .replace(/\/index$/i, '')
+        .toLowerCase();
+      urls.add(route);
+      continue;
+    }
+
+    // Routes folder: src/routes/dashboard.tsx -> /dashboard
+    const routesMatch = path.match(/(?:src\/)?routes\/(.+?)\.(tsx?|jsx?|vue|svelte)$/);
+    if (routesMatch) {
+      const route = '/' + routesMatch[1]
+        .replace(/([a-z])([A-Z])/g, '$1-$2')
+        .replace(/\/index$/i, '')
+        .toLowerCase();
+      urls.add(route);
+      continue;
+    }
+  }
+
+  return Array.from(urls);
+}

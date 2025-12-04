@@ -2,7 +2,7 @@ import * as core from '@actions/core';
 import * as github from '@actions/github';
 import * as exec from '@actions/exec';
 import { ScoutAIClient, ResultPayload, DiffFile } from './api/client';
-import { extractDiffMetadata } from './diff/extractor';
+import { extractDiffMetadata, extractLikelyUrls } from './diff/extractor';
 import { executeFlows } from './executor/playwright';
 import { postPRComment, postSkippedPRComment, calculateSummary, setOutputs } from './reporter/github';
 import { createIssuesForFailures } from './reporter/issues';
@@ -379,12 +379,22 @@ async function run(): Promise<void> {
     // Install Playwright browsers (needed for crawling)
     await installPlaywright();
 
+    // Extract likely URLs from changed file paths to prioritize crawling affected pages
+    const priorityPaths = extractLikelyUrls(diffMetadata.files);
+    if (priorityPaths.length > 0) {
+      core.info(`Extracted ${priorityPaths.length} likely URLs from changed files:`);
+      for (const path of priorityPaths) {
+        core.info(`  - ${path}`);
+      }
+    }
+
     // Crawl the site to get real page structure (up to 3 pages in fast mode, 5 in deep)
+    // Priority paths (pages affected by PR) are crawled first
     const maxPages = mode === 'fast' ? 3 : 5;
     core.info(`Crawling site to discover page structure (max ${maxPages} pages)...`);
     let siteContext;
     try {
-      const pages = await crawlSite(baseUrl, maxPages);
+      const pages = await crawlSite(baseUrl, maxPages, priorityPaths);
       siteContext = { pages };
 
       // Summarize what we found

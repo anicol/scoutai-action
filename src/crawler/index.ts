@@ -258,11 +258,38 @@ export async function crawlPage(url: string): Promise<PageContext> {
 
 /**
  * Crawl multiple pages to build a site map.
+ * @param baseUrl - The base URL to start crawling from
+ * @param maxPages - Maximum number of pages to crawl
+ * @param priorityPaths - URL paths to crawl first (e.g., ['/dashboard/multi-store'])
  */
-export async function crawlSite(baseUrl: string, maxPages: number = 5): Promise<PageContext[]> {
+export async function crawlSite(
+  baseUrl: string,
+  maxPages: number = 5,
+  priorityPaths: string[] = []
+): Promise<PageContext[]> {
   const visited = new Set<string>();
   const results: PageContext[] = [];
-  const toVisit = [baseUrl];
+
+  // Build initial queue: priority paths first, then base URL
+  const toVisit: string[] = [];
+
+  // Add priority paths first (pages affected by the PR)
+  for (const path of priorityPaths) {
+    try {
+      const fullUrl = new URL(path, baseUrl).href;
+      if (!toVisit.includes(fullUrl)) {
+        toVisit.push(fullUrl);
+        core.info(`  Priority page: ${path}`);
+      }
+    } catch {
+      // Invalid URL path, skip
+    }
+  }
+
+  // Add base URL if not already in queue
+  if (!toVisit.includes(baseUrl)) {
+    toVisit.push(baseUrl);
+  }
 
   while (toVisit.length > 0 && results.length < maxPages) {
     const url = toVisit.shift()!;
