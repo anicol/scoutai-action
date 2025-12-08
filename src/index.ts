@@ -383,6 +383,39 @@ async function run(): Promise<void> {
     // Install Playwright browsers (needed for crawling)
     await installPlaywright();
 
+    // Determine test account for authentication (used for both crawling and execution)
+    // Priority: 1) Action inputs, 2) API-configured account from project settings
+    let testAccount = null;
+
+    if (authUsername && authPassword) {
+      // Use credentials from action inputs
+      core.info('Using auth credentials from action inputs');
+      testAccount = {
+        id: 'input-auth',
+        name: 'Action Input Auth',
+        role: 'user',
+        email: authUsername,
+        password: authPassword,
+        auth_type: 'form' as const,
+        login_url: authLoginUrl,
+        email_selector: authEmailSelector || undefined,
+        password_selector: authPasswordSelector || undefined,
+        submit_selector: authSubmitSelector || undefined,
+        success_indicator: authSuccessIndicator || undefined,
+        is_default: true,
+        is_active: true,
+      };
+    } else {
+      // Try to fetch from API (project settings configured via UI)
+      core.info('Checking for test account in project settings...');
+      testAccount = await client.getDefaultTestAccount(projectId);
+      if (testAccount) {
+        core.info(`Found test account: ${testAccount.name} (${testAccount.role})`);
+      } else {
+        core.info('No test account configured - running without authentication');
+      }
+    }
+
     // Extract likely URLs from changed file paths to prioritize crawling affected pages
     const priorityPaths = extractLikelyUrls(diffMetadata.files);
     if (priorityPaths.length > 0) {
@@ -397,19 +430,21 @@ async function run(): Promise<void> {
     const maxPages = mode === 'fast' ? 3 : 5;
     core.info(`Crawling site to discover page structure (max ${maxPages} pages)...`);
 
-    // Build crawl credentials if auth inputs are provided
+    // Build crawl credentials from test account (action inputs or API-configured)
     let crawlCredentials: CrawlCredentials | undefined;
-    if (authUsername && authPassword) {
+    if (testAccount && testAccount.auth_type === 'form') {
       crawlCredentials = {
-        email: authUsername,
-        password: authPassword,
-        loginUrl: authLoginUrl,
-        emailSelector: authEmailSelector || undefined,
-        passwordSelector: authPasswordSelector || undefined,
-        submitSelector: authSubmitSelector || undefined,
-        successIndicator: authSuccessIndicator || undefined,
+        email: testAccount.email,
+        password: testAccount.password,
+        loginUrl: testAccount.login_url || '/login',
+        emailSelector: testAccount.email_selector || undefined,
+        passwordSelector: testAccount.password_selector || undefined,
+        submitSelector: testAccount.submit_selector || undefined,
+        successIndicator: testAccount.success_indicator || undefined,
       };
-      core.info('Crawling with authentication enabled');
+      core.info(`Crawling with authentication (${testAccount.name})`);
+    } else if (testAccount) {
+      core.info(`Test account auth_type is '${testAccount.auth_type}' - crawler only supports 'form' auth, crawling anonymously`);
     }
 
     let siteContext;
@@ -472,35 +507,6 @@ async function run(): Promise<void> {
 
     // Mark run as started
     await client.startRun(runId);
-
-    // Determine test account for authentication
-    // Priority: 1) Action inputs, 2) API-configured account
-    let testAccount = null;
-
-    if (authUsername && authPassword) {
-      // Use credentials from action inputs
-      core.info(`Using auth credentials from action inputs`);
-      testAccount = {
-        id: 'input-auth',
-        name: 'Action Input Auth',
-        role: 'user',
-        email: authUsername,
-        password: authPassword,
-        auth_type: 'form' as const,
-        login_url: authLoginUrl,
-        is_default: true,
-        is_active: true,
-      };
-    } else {
-      // Try to fetch from API
-      core.info('Checking for test account in API...');
-      testAccount = await client.getDefaultTestAccount(projectId);
-      if (testAccount) {
-        core.info(`Found test account: ${testAccount.name} (${testAccount.role})`);
-      } else {
-        core.info('No test account configured - running without authentication');
-      }
-    }
 
     // Create screenshots directory
     const screenshotDir = './scoutai-screenshots';
