@@ -1,3 +1,30 @@
+/**
+ * Credentials for authenticating during crawl.
+ */
+export interface CrawlCredentials {
+    email: string;
+    password: string;
+    loginUrl: string;
+    emailSelector?: string;
+    passwordSelector?: string;
+    submitSelector?: string;
+    successIndicator?: string;
+}
+/**
+ * Result of authentication attempt.
+ */
+export interface AuthResult {
+    success: boolean;
+    postLoginUrl?: string;
+    error?: string;
+}
+/**
+ * Result of a site crawl including auth status.
+ */
+export interface CrawlResult {
+    pages: PageContext[];
+    authResult?: AuthResult;
+}
 export interface PageContext {
     url: string;
     title: string;
@@ -40,6 +67,7 @@ export declare function crawlPage(url: string): Promise<PageContext>;
  * @param baseUrl - The base URL to start crawling from
  * @param maxPages - Maximum number of pages to crawl
  * @param priorityPaths - URL paths to crawl first (e.g., ['/dashboard/multi-store'])
+ * @param credentials - Optional credentials for authenticated crawling
  */
-export declare function crawlSite(baseUrl: string, maxPages?: number, priorityPaths?: string[]): Promise<PageContext[]>;
+export declare function crawlSite(baseUrl: string, maxPages?: number, priorityPaths?: string[], credentials?: CrawlCredentials): Promise<CrawlResult>;
 //# sourceMappingURL=index.d.ts.map

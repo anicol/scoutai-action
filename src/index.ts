@@ -6,7 +6,7 @@ import { extractDiffMetadata, extractLikelyUrls } from './diff/extractor';
 import { executeFlows } from './executor/playwright';
 import { postPRComment, postSkippedPRComment, calculateSummary, setOutputs } from './reporter/github';
 import { createIssuesForFailures } from './reporter/issues';
-import { crawlSite } from './crawler';
+import { crawlSite, CrawlCredentials } from './crawler';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -279,6 +279,10 @@ async function run(): Promise<void> {
     const authUsername = core.getInput('auth-username');
     const authPassword = core.getInput('auth-password');
     const authLoginUrl = core.getInput('auth-login-url') || '/login';
+    const authEmailSelector = core.getInput('auth-email-selector');
+    const authPasswordSelector = core.getInput('auth-password-selector');
+    const authSubmitSelector = core.getInput('auth-submit-selector');
+    const authSuccessIndicator = core.getInput('auth-success-indicator');
 
     // Environment and trigger inputs
     let environment = core.getInput('environment') || 'staging';
@@ -392,12 +396,39 @@ async function run(): Promise<void> {
     // Priority paths (pages affected by PR) are crawled first
     const maxPages = mode === 'fast' ? 3 : 5;
     core.info(`Crawling site to discover page structure (max ${maxPages} pages)...`);
+
+    // Build crawl credentials if auth inputs are provided
+    let crawlCredentials: CrawlCredentials | undefined;
+    if (authUsername && authPassword) {
+      crawlCredentials = {
+        email: authUsername,
+        password: authPassword,
+        loginUrl: authLoginUrl,
+        emailSelector: authEmailSelector || undefined,
+        passwordSelector: authPasswordSelector || undefined,
+        submitSelector: authSubmitSelector || undefined,
+        successIndicator: authSuccessIndicator || undefined,
+      };
+      core.info('Crawling with authentication enabled');
+    }
+
     let siteContext;
+    let crawlAuthResult;
     try {
-      const pages = await crawlSite(baseUrl, maxPages, priorityPaths);
-      siteContext = { pages };
+      const crawlResult = await crawlSite(baseUrl, maxPages, priorityPaths, crawlCredentials);
+      siteContext = { pages: crawlResult.pages };
+      crawlAuthResult = crawlResult.authResult;
+
+      if (crawlAuthResult) {
+        if (crawlAuthResult.success) {
+          core.info(`Authenticated crawl successful - landed at: ${crawlAuthResult.postLoginUrl}`);
+        } else {
+          core.warning(`Authenticated crawl failed: ${crawlAuthResult.error}`);
+        }
+      }
 
       // Summarize what we found
+      const pages = crawlResult.pages;
       const totalLinks = pages.reduce((sum, p) => sum + p.links.length, 0);
       const totalForms = pages.reduce((sum, p) => sum + p.forms.length, 0);
       const totalInputs = pages.reduce((sum, p) => sum + p.forms.reduce((s, f) => s + f.inputs.length, 0), 0);
