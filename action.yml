@@ -34,6 +34,18 @@ inputs:
     description: 'Login page URL path (default: /login)'
     required: false
     default: '/login'
+  auth-email-selector:
+    description: 'CSS selector for email/username input field (auto-detected if not provided)'
+    required: false
+  auth-password-selector:
+    description: 'CSS selector for password input field (auto-detected if not provided)'
+    required: false
+  auth-submit-selector:
+    description: 'CSS selector for login submit button (auto-detected if not provided)'
+    required: false
+  auth-success-indicator:
+    description: 'URL path or CSS selector to verify successful login'
+    required: false
   environment:
     description: 'Deployment environment: staging, production, or preview'
     required: false
