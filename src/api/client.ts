@@ -86,6 +86,90 @@ export interface TestAccount {
   is_active: boolean;
 }
 
+// Scout Test types
+export interface TypeFile {
+  path: string;
+  content: string;
+}
+
+export interface SchemaFiles {
+  openapi?: object;
+  graphql?: string;
+  prisma?: string;
+}
+
+export interface TestPatterns {
+  sample_tests: TypeFile[];
+  config?: object;
+  fixtures?: TypeFile[];
+}
+
+export interface ChangedFile {
+  path: string;
+  status: 'added' | 'modified' | 'deleted';
+  content: string;
+  previous_content?: string;
+}
+
+export interface FileDependency {
+  file: string;
+  imports: string[];
+  imported_by: string[];
+}
+
+export interface CodebaseContext {
+  project: {
+    language: string;
+    framework?: string;
+    test_framework?: string;
+    package_json?: object;
+  };
+  types: TypeFile[];
+  schemas: SchemaFiles;
+  test_patterns: TestPatterns;
+  diff: {
+    files: ChangedFile[];
+    base_sha: string;
+    head_sha: string;
+  };
+  dependencies: FileDependency[];
+}
+
+export interface ScoutTestAnalyzeResponse {
+  run_id: string;
+  status: 'pending' | 'analyzing' | 'ready' | 'executing' | 'completed' | 'error';
+  risk_score: number;
+  risk_factors: Record<string, unknown>;
+  coverage_gaps: string[];
+}
+
+export interface GeneratedTest {
+  id: string;
+  test_type: 'unit' | 'api' | 'integration';
+  name: string;
+  test_code: string;
+  test_framework: string;
+  target_file: string;
+}
+
+export interface ScoutTestRunResponse {
+  id: string;
+  status: string;
+  risk_score: number;
+  merge_recommendation?: 'recommend' | 'caution' | 'block';
+  recommendation_reason?: string;
+  tests: GeneratedTest[];
+}
+
+export interface TestResult {
+  test_id: string;
+  status: 'passed' | 'failed' | 'skipped';
+  duration_ms: number;
+  error_message?: string;
+  stdout?: string;
+  stderr?: string;
+}
+
 export class ScoutAIClient {
   private apiKey: string;
   private baseUrl: string;
@@ -192,5 +276,74 @@ export class ScoutAIClient {
       'GET',
       `/api/projects/${projectId}/test-accounts/`
     );
+  }
+
+  // Scout Test API methods
+  async analyzeForScoutTest(
+    projectId: string,
+    context: CodebaseContext,
+    prNumber?: number,
+    prTitle?: string
+  ): Promise<ScoutTestAnalyzeResponse> {
+    return this.request<ScoutTestAnalyzeResponse>(
+      'POST',
+      '/api/scout-test/analyze/',
+      {
+        project_id: projectId,
+        context,
+        pr_number: prNumber,
+        pr_title: prTitle,
+      }
+    );
+  }
+
+  async getScoutTestRun(runId: string): Promise<ScoutTestRunResponse> {
+    return this.request<ScoutTestRunResponse>(
+      'GET',
+      `/api/scout-test/runs/${runId}/`
+    );
+  }
+
+  async getScoutTestTests(runId: string): Promise<GeneratedTest[]> {
+    return this.request<GeneratedTest[]>(
+      'GET',
+      `/api/scout-test/runs/${runId}/tests/`
+    );
+  }
+
+  async reportScoutTestResults(
+    runId: string,
+    results: TestResult[]
+  ): Promise<void> {
+    await this.request(
+      'POST',
+      `/api/scout-test/runs/${runId}/results/`,
+      { results }
+    );
+  }
+
+  async waitForScoutTestReady(
+    runId: string,
+    timeoutMs: number = 120000,
+    pollIntervalMs: number = 2000
+  ): Promise<ScoutTestRunResponse> {
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < timeoutMs) {
+      const run = await this.getScoutTestRun(runId);
+
+      if (run.status === 'ready') {
+        return run;
+      }
+
+      if (run.status === 'error' || run.status === 'completed') {
+        throw new Error(`Scout Test run ended with status: ${run.status}`);
+      }
+
+      // Wait before polling again
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+    }
+
+    throw new Error(`Timeout waiting for Scout Test analysis to complete`);
   }
 }
