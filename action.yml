@@ -14,9 +14,17 @@ inputs:
     description: 'Base URL of the application to test. If not provided, uses the URL configured in your ScoutAI project settings.'
     required: false
   mode:
-    description: 'Test mode: fast (PR checks) or deep (nightly exploration)'
+    description: 'Test mode: fast (PR checks), deep (nightly exploration), or scout-test (AI-generated unit/API tests)'
     required: false
     default: 'fast'
+  include-types:
+    description: 'Glob patterns for type definition files to include (scout-test mode)'
+    required: false
+    default: '**/*.d.ts,**/types.ts,**/types/**/*.ts'
+  include-schemas:
+    description: 'Glob patterns for schema files to include (scout-test mode)'
+    required: false
+    default: 'openapi.json,openapi.yaml,schema.graphql,prisma/schema.prisma'
   api-endpoint:
     description: 'ScoutAI API endpoint'
     required: false

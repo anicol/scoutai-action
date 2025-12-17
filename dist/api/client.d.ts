@@ -73,6 +73,79 @@ export interface TestAccount {
     is_default: boolean;
     is_active: boolean;
 }
+export interface TypeFile {
+    path: string;
+    content: string;
+}
+export interface SchemaFiles {
+    openapi?: object;
+    graphql?: string;
+    prisma?: string;
+}
+export interface TestPatterns {
+    sample_tests: TypeFile[];
+    config?: object;
+    fixtures?: TypeFile[];
+}
+export interface ChangedFile {
+    path: string;
+    status: 'added' | 'modified' | 'deleted';
+    content: string;
+    previous_content?: string;
+}
+export interface FileDependency {
+    file: string;
+    imports: string[];
+    imported_by: string[];
+}
+export interface CodebaseContext {
+    project: {
+        language: string;
+        framework?: string;
+        test_framework?: string;
+        package_json?: object;
+    };
+    types: TypeFile[];
+    schemas: SchemaFiles;
+    test_patterns: TestPatterns;
+    diff: {
+        files: ChangedFile[];
+        base_sha: string;
+        head_sha: string;
+    };
+    dependencies: FileDependency[];
+}
+export interface ScoutTestAnalyzeResponse {
+    run_id: string;
+    status: 'pending' | 'analyzing' | 'ready' | 'executing' | 'completed' | 'error';
+    risk_score: number;
+    risk_factors: Record<string, unknown>;
+    coverage_gaps: string[];
+}
+export interface GeneratedTest {
+    id: string;
+    test_type: 'unit' | 'api' | 'integration';
+    name: string;
+    test_code: string;
+    test_framework: string;
+    target_file: string;
+}
+export interface ScoutTestRunResponse {
+    id: string;
+    status: string;
+    risk_score: number;
+    merge_recommendation?: 'recommend' | 'caution' | 'block';
+    recommendation_reason?: string;
+    tests: GeneratedTest[];
+}
+export interface TestResult {
+    test_id: string;
+    status: 'passed' | 'failed' | 'skipped';
+    duration_ms: number;
+    error_message?: string;
+    stdout?: string;
+    stderr?: string;
+}
 export declare class ScoutAIClient {
     private apiKey;
     private baseUrl;
@@ -90,5 +163,10 @@ export declare class ScoutAIClient {
     uploadResults(runId: string, results: ResultPayload[]): Promise<void>;
     getDefaultTestAccount(projectId: string): Promise<TestAccount | null>;
     getTestAccounts(projectId: string): Promise<TestAccount[]>;
+    analyzeForScoutTest(projectId: string, context: CodebaseContext, prNumber?: number, prTitle?: string): Promise<ScoutTestAnalyzeResponse>;
+    getScoutTestRun(runId: string): Promise<ScoutTestRunResponse>;
+    getScoutTestTests(runId: string): Promise<GeneratedTest[]>;
+    reportScoutTestResults(runId: string, results: TestResult[]): Promise<void>;
+    waitForScoutTestReady(runId: string, timeoutMs?: number, pollIntervalMs?: number): Promise<ScoutTestRunResponse>;
 }
 //# sourceMappingURL=client.d.ts.map

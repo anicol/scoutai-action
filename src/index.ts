@@ -1,12 +1,13 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 import * as exec from '@actions/exec';
-import { ScoutAIClient, ResultPayload, DiffFile } from './api/client';
+import { ScoutAIClient, ResultPayload, DiffFile, TestResult, GeneratedTest } from './api/client';
 import { extractDiffMetadata, extractLikelyUrls } from './diff/extractor';
 import { executeFlows } from './executor/playwright';
 import { postPRComment, postSkippedPRComment, calculateSummary, setOutputs } from './reporter/github';
 import { createIssuesForFailures } from './reporter/issues';
 import { crawlSite, CrawlCredentials } from './crawler';
+import { collectCodebaseContext } from './context/collector';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -264,6 +265,273 @@ async function detectPreviewUrl(): Promise<string | null> {
   return null;
 }
 
+/**
+ * Write generated tests to temporary directory
+ */
+function writeGeneratedTests(tests: GeneratedTest[]): string {
+  const testDir = '.scout-tests';
+
+  // Clean up existing directory
+  if (fs.existsSync(testDir)) {
+    fs.rmSync(testDir, { recursive: true });
+  }
+  fs.mkdirSync(testDir, { recursive: true });
+
+  for (const test of tests) {
+    // Determine file extension based on framework
+    let ext = '.test.ts';
+    if (test.test_framework === 'pytest') ext = '_test.py';
+    else if (test.test_framework === 'go-test') ext = '_test.go';
+    else if (test.test_framework === 'rspec') ext = '_spec.rb';
+    else if (test.test_framework === 'vitest') ext = '.test.ts';
+    else if (test.test_framework === 'jest') ext = '.test.ts';
+
+    const fileName = test.name.replace(/[^a-zA-Z0-9_-]/g, '_') + ext;
+    const filePath = path.join(testDir, fileName);
+
+    fs.writeFileSync(filePath, test.test_code);
+    core.info(`  Written: ${filePath}`);
+  }
+
+  return testDir;
+}
+
+/**
+ * Execute generated tests using the project's test framework
+ */
+async function executeGeneratedTests(
+  tests: GeneratedTest[],
+  testDir: string,
+  testFramework: string
+): Promise<TestResult[]> {
+  const results: TestResult[] = [];
+
+  // Determine test command based on framework
+  let testCommand: string[];
+
+  switch (testFramework) {
+    case 'jest':
+      testCommand = ['npx', 'jest', '--testPathPattern', testDir, '--json', '--outputFile', '.scout-results.json'];
+      break;
+    case 'vitest':
+      testCommand = ['npx', 'vitest', 'run', testDir, '--reporter', 'json', '--outputFile', '.scout-results.json'];
+      break;
+    case 'pytest':
+      testCommand = ['python', '-m', 'pytest', testDir, '--json-report', '--json-report-file=.scout-results.json'];
+      break;
+    case 'go-test':
+      testCommand = ['go', 'test', '-v', '-json', `./${testDir}/...`];
+      break;
+    default:
+      // Try to auto-detect based on package.json
+      if (fs.existsSync('package.json')) {
+        testCommand = ['npm', 'test', '--', testDir];
+      } else if (fs.existsSync('pytest.ini') || fs.existsSync('pyproject.toml')) {
+        testCommand = ['python', '-m', 'pytest', testDir, '-v'];
+      } else {
+        core.warning(`Unknown test framework: ${testFramework}, skipping execution`);
+        return results;
+      }
+  }
+
+  core.info(`Running tests with: ${testCommand.join(' ')}`);
+
+  const startTime = Date.now();
+  let stdout = '';
+  let stderr = '';
+  let exitCode = 0;
+
+  try {
+    exitCode = await exec.exec(testCommand[0], testCommand.slice(1), {
+      listeners: {
+        stdout: (data: Buffer) => {
+          stdout += data.toString();
+        },
+        stderr: (data: Buffer) => {
+          stderr += data.toString();
+        },
+      },
+      ignoreReturnCode: true,
+    });
+  } catch (error) {
+    stderr += String(error);
+    exitCode = 1;
+  }
+
+  const duration = Date.now() - startTime;
+
+  // Try to parse structured results
+  if (fs.existsSync('.scout-results.json')) {
+    try {
+      const jsonResults = JSON.parse(fs.readFileSync('.scout-results.json', 'utf-8'));
+
+      // Parse Jest/Vitest format
+      if (jsonResults.testResults) {
+        for (const testResult of jsonResults.testResults) {
+          for (const assertion of testResult.assertionResults || []) {
+            const test = tests.find(t => testResult.name?.includes(t.name));
+            results.push({
+              test_id: test?.id || 'unknown',
+              status: assertion.status === 'passed' ? 'passed' : 'failed',
+              duration_ms: assertion.duration || 0,
+              error_message: assertion.failureMessages?.join('\n'),
+              stdout: stdout.slice(0, 10000),
+              stderr: stderr.slice(0, 10000),
+            });
+          }
+        }
+      }
+      // Parse pytest format
+      else if (jsonResults.tests) {
+        for (const testItem of jsonResults.tests) {
+          const test = tests.find(t => testItem.nodeid?.includes(t.name));
+          results.push({
+            test_id: test?.id || 'unknown',
+            status: testItem.outcome === 'passed' ? 'passed' : 'failed',
+            duration_ms: (testItem.duration || 0) * 1000,
+            error_message: testItem.longrepr,
+            stdout: stdout.slice(0, 10000),
+            stderr: stderr.slice(0, 10000),
+          });
+        }
+      }
+
+      // Clean up results file
+      fs.unlinkSync('.scout-results.json');
+    } catch (error) {
+      core.debug(`Failed to parse test results JSON: ${error}`);
+    }
+  }
+
+  // If no structured results, create one result per test based on exit code
+  if (results.length === 0) {
+    for (const test of tests) {
+      results.push({
+        test_id: test.id,
+        status: exitCode === 0 ? 'passed' : 'failed',
+        duration_ms: Math.floor(duration / tests.length),
+        error_message: exitCode !== 0 ? `Test failed with exit code ${exitCode}` : undefined,
+        stdout: stdout.slice(0, 10000),
+        stderr: stderr.slice(0, 10000),
+      });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Run Scout Test mode - AI-generated unit/API tests
+ */
+async function runScoutTestMode(
+  client: ScoutAIClient,
+  projectId: string,
+  typePatterns: string[],
+  schemaPatterns: string[]
+): Promise<void> {
+  const context = github.context;
+  const prNumber = context.payload.pull_request?.number;
+  const prTitle = context.payload.pull_request?.title;
+
+  // Get git SHAs
+  const baseSha = context.payload.pull_request?.base?.sha ||
+    (await exec.getExecOutput('git', ['rev-parse', 'HEAD~1'])).stdout.trim();
+  const headSha = context.payload.pull_request?.head?.sha ||
+    (await exec.getExecOutput('git', ['rev-parse', 'HEAD'])).stdout.trim();
+
+  core.info(`Analyzing changes: ${baseSha.slice(0, 7)}..${headSha.slice(0, 7)}`);
+
+  // Step 1: Collect codebase context
+  core.info('Step 1: Collecting codebase context...');
+  const codebaseContext = await collectCodebaseContext(
+    typePatterns,
+    schemaPatterns,
+    baseSha,
+    headSha
+  );
+
+  if (codebaseContext.diff.files.length === 0) {
+    core.info('No changed files detected, skipping Scout Test');
+    setOutputs('skipped', 'passed', { passed: 0, failed: 0, skipped: 0, duration_ms: 0 });
+    return;
+  }
+
+  // Step 2: Upload context and start analysis
+  core.info('Step 2: Uploading context to Scout API...');
+  const analyzeResponse = await client.analyzeForScoutTest(
+    projectId,
+    codebaseContext,
+    prNumber,
+    prTitle
+  );
+
+  core.info(`Scout Test run ID: ${analyzeResponse.run_id}`);
+  core.info(`Risk score: ${analyzeResponse.risk_score}/10`);
+  core.info(`Coverage gaps: ${analyzeResponse.coverage_gaps.length}`);
+
+  // Step 3: Wait for test generation
+  core.info('Step 3: Waiting for test generation...');
+  const run = await client.waitForScoutTestReady(analyzeResponse.run_id, 180000); // 3 min timeout
+
+  if (run.tests.length === 0) {
+    core.info('No tests generated - coverage is sufficient');
+    setOutputs(analyzeResponse.run_id, 'passed', { passed: 0, failed: 0, skipped: 0, duration_ms: 0 });
+    return;
+  }
+
+  core.info(`Generated ${run.tests.length} tests`);
+
+  // Step 4: Write tests to temporary directory
+  core.info('Step 4: Writing generated tests...');
+  const testDir = writeGeneratedTests(run.tests);
+
+  // Step 5: Execute tests
+  core.info('Step 5: Executing generated tests...');
+  const testFramework = codebaseContext.project.test_framework || 'jest';
+  const results = await executeGeneratedTests(run.tests, testDir, testFramework);
+
+  // Step 6: Report results back to Scout
+  core.info('Step 6: Reporting results to Scout API...');
+  await client.reportScoutTestResults(analyzeResponse.run_id, results);
+
+  // Calculate summary
+  const passed = results.filter(r => r.status === 'passed').length;
+  const failed = results.filter(r => r.status === 'failed').length;
+  const totalDuration = results.reduce((sum, r) => sum + r.duration_ms, 0);
+
+  core.info('');
+  core.info('=== Scout Test Results ===');
+  core.info(`Passed: ${passed}`);
+  core.info(`Failed: ${failed}`);
+  core.info(`Risk Score: ${run.risk_score}/10`);
+  if (run.merge_recommendation) {
+    core.info(`Recommendation: ${run.merge_recommendation.toUpperCase()}`);
+    if (run.recommendation_reason) {
+      core.info(`Reason: ${run.recommendation_reason}`);
+    }
+  }
+
+  // Set outputs
+  setOutputs(analyzeResponse.run_id, failed > 0 ? 'failed' : 'passed', {
+    passed,
+    failed,
+    skipped: 0,
+    duration_ms: totalDuration,
+  });
+
+  // Clean up
+  if (fs.existsSync(testDir)) {
+    fs.rmSync(testDir, { recursive: true });
+  }
+
+  // Set final status
+  if (failed > 0) {
+    core.setFailed(`Scout Test: ${failed} test(s) failed`);
+  } else {
+    core.info(`Scout Test: All ${passed} tests passed`);
+  }
+}
+
 async function run(): Promise<void> {
   const startTime = Date.now();
 
@@ -271,9 +539,13 @@ async function run(): Promise<void> {
     // Get inputs
     const apiKey = core.getInput('api-key', { required: true });
     let baseUrl = core.getInput('base-url');  // Now optional - can come from project config
-    const mode = core.getInput('mode') as 'fast' | 'deep' || 'fast';
+    const mode = core.getInput('mode') as 'fast' | 'deep' | 'scout-test' || 'fast';
     const apiEndpoint = core.getInput('api-endpoint') || 'https://scoutai-api.onrender.com';
     let projectId = core.getInput('project-id');
+
+    // Scout Test specific inputs
+    const includeTypes = core.getInput('include-types') || '**/*.d.ts,**/types.ts,**/types/**/*.ts';
+    const includeSchemas = core.getInput('include-schemas') || 'openapi.json,openapi.yaml,schema.graphql,prisma/schema.prisma';
 
     // Auth inputs (optional - can also be configured via API)
     const authUsername = core.getInput('auth-username');
@@ -327,6 +599,18 @@ async function run(): Promise<void> {
       }
     }
 
+    core.info(`Project ID: ${projectId}`);
+
+    // Scout Test mode - AI-generated unit/API tests (no base URL needed)
+    if (mode === 'scout-test') {
+      core.info('Running in Scout Test mode (AI-generated unit/API tests)');
+      const typePatterns = includeTypes.split(',').map(p => p.trim());
+      const schemaPatterns = includeSchemas.split(',').map(p => p.trim());
+      await runScoutTestMode(client, projectId, typePatterns, schemaPatterns);
+      return;
+    }
+
+    // E2E modes (fast/deep) require a base URL
     // Try to auto-detect preview URL if no base-url provided
     if (!baseUrl) {
       const previewUrl = await detectPreviewUrl();
@@ -341,7 +625,6 @@ async function run(): Promise<void> {
       throw new Error('base-url is required. Either provide it in the action inputs or configure it in your ScoutAI project settings.');
     }
 
-    core.info(`Project ID: ${projectId}`);
     core.info(`Base URL: ${baseUrl}`);
 
     // Extract diff metadata
